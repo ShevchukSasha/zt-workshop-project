@@ -1,98 +1,37 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hello World</title>
-    <style>
-      body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background: linear-gradient(135deg, #dbeafe, #f0fdf4);
-        margin: 0;
-        padding: 0;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-      }
+use ic_stable_structures::{
+    memory_manager::{MemoryId, MemoryManager, VirtualMemory},
+    DefaultMemoryImpl,
+};
+use std::cell::RefCell;
 
-      main {
-        background-color: #ffffffcc;
-        padding: 40px;
-        border-radius: 16px;
-        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-        max-width: 500px;
-        width: 100%;
-        text-align: center;
-        backdrop-filter: blur(8px);
-      }
+type Memory = VirtualMemory<DefaultMemoryImpl>;
 
-      form {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-      }
+// To store global state in a Rust canister, we use the `thread_local!` macro.
+thread_local! {
+    // The memory manager is used for simulating multiple memories. Given a `MemoryId` it can
+    // return a memory that can be used by stable structures.
+    static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+        RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-      label {
-        font-size: 1.2rem;
-        color: #333;
-      }
+    // We store the greeting in a `Cell` in stable memory such that it gets persisted over canister upgrades.
+    static GREETING: RefCell<ic_stable_structures::Cell<String, Memory>> = RefCell::new(
+        ic_stable_structures::Cell::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(MemoryId::new(0))), "Hello, ".to_string()
+        ).unwrap()
+    );
+}
 
-      input[type='text'] {
-        padding: 10px;
-        font-size: 1rem;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        outline: none;
-      }
+// This update method stores the greeting prefix in stable memory.
+#[ic_cdk::update]
+fn set_greeting(prefix: String) {
+    GREETING.with_borrow_mut(|greeting| greeting.set(prefix).unwrap());
+}
 
-      button {
-        padding: 10px;
-        font-size: 1rem;
-        background-color: #4f46e5;
-        color: white;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background-color 0.3s ease;
-      }
+// This query method returns the currently persisted greeting with the given name.
+#[ic_cdk::query]
+fn greet(name: String) -> String {
+    GREETING.with_borrow(|greeting| format!("{}{name}!", greeting.get()))
+}
 
-      button:hover {
-        background-color: #4338ca;
-      }
-
-      #greeting {
-        margin-top: 20px;
-        padding: 15px;
-        font-size: 1.1rem;
-        color: #155724;
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 8px;
-      }
-
-      #greeting:empty {
-        display: none;
-      }
-    </style>
-    <script type="module">
-      import { backend } from 'declarations/backend';
-      document.querySelector('form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const name = document.getElementById('name').value.toString();
-        const greeting = await backend.greet(name);
-        document.getElementById('greeting').innerText = greeting;
-      });
-    </script>
-  </head>
-  <body>
-    <main>
-      <form>
-        <label for="name">I am Alex. Enter your name:</label>
-        <input id="name" alt="Name" type="text" placeholder="Your name..." />
-        <button type="submit">Click Me!</button>
-      </form>
-      <section id="greeting"></section>
-    </main>
-  </body>
-</html>
+// Export the interface for the smart contract.
+ic_cdk::export_candid!();
